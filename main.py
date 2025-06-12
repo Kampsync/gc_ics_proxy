@@ -4,26 +4,36 @@ import requests
 import re
 from flask import Flask, Response, request
 from ics import Calendar, Event
+from datetime import datetime
 
 app = Flask(__name__)
-XANO_API_BASE_URL = os.environ.get("XANO_BASE_URL")
+XANO_BASE_URL = os.environ.get("XANO_BASE_URL")
+XANO_SAVE_LINK_URL = os.environ.get("XANO_SAVE_LINK_URL")
+SERVICE_BASE_URL = os.environ.get("SERVICE_BASE_URL")
 PORT = int(os.environ.get("PORT", 8080))
-UUID_NAMESPACE = uuid.UUID("2f1d3dfc-b806-4542-996c-e6f27f1d9a17")
 
-@app.route("/<listing_id>.ics", methods=["GET"])
-def generate_ics(listing_id):
-    if not XANO_API_BASE_URL or not listing_id:
-        return Response("Missing configuration or listing ID", status=400)
+@app.route("/api/<ical_token>.ics", methods=["GET"])
+def generate_ics_by_token(ical_token):
+    if not XANO_BASE_URL or not SERVICE_BASE_URL or not ical_token:
+        return Response("Missing configuration or token", status=400)
 
     try:
-        response = requests.get(XANO_API_BASE_URL, params={"listing_id": listing_id})
-        response.raise_for_status()
-        bookings = response.json()
+        res = requests.get(XANO_BASE_URL, params={"ical_token": ical_token})
+        res.raise_for_status()
+        bookings = res.json()
+
+        if not bookings:
+            return Response("No bookings found.", status=404)
 
         calendar = Calendar()
+        namespace = uuid.UUID("2f1d3dfc-b806-4542-996c-e6f27f1d9a17")
+
+        listing_id = bookings[0].get("listing_id")
+        if not listing_id:
+            return Response("Missing listing_id in booking data", status=500)
 
         for booking in bookings:
-            uid = str(uuid.uuid5(UUID_NAMESPACE, f"{listing_id}-{booking.get('uid')}"))
+            uid = str(uuid.uuid5(namespace, f"{ical_token}-{booking.get('uid')}"))
             platform = (booking.get("source_platform") or "").lower()
             raw_uid = booking.get("uid") or ""
             booking_link = ""
@@ -50,13 +60,22 @@ def generate_ics(listing_id):
             event.begin = booking.get("start_date")
             event.end = booking.get("end_date")
             event.uid = uid
-            description = booking.get("description", "")
-            if booking_link:
-                description += f"\nBooking Link: {booking_link}"
-            event.description = description.strip()
+            event.description = f"{booking.get('description', '')}\nBooking Link: {booking_link}".strip()
             event.location = booking.get("location", "")
             event.make_all_day()
             calendar.events.add(event)
+
+        # Save permanent link to Xano
+        if XANO_SAVE_LINK_URL:
+            try:
+                link_to_save = f"{SERVICE_BASE_URL}/api/{ical_token}.ics"
+                save_payload = {
+                    "listing_id": listing_id,
+                    "kampsync_ical_link": link_to_save
+                }
+                requests.post(XANO_SAVE_LINK_URL, json=save_payload)
+            except Exception as e:
+                print(f"⚠️ Failed to post permanent link to Xano: {e}")
 
         return Response(str(calendar), mimetype="text/calendar")
 
