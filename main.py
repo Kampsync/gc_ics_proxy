@@ -2,7 +2,7 @@ import os
 import uuid
 import requests
 import re
-from flask import Flask, Response, request
+from flask import Flask, Response
 from ics import Calendar, Event
 from datetime import datetime
 
@@ -16,7 +16,7 @@ def generate_ics(listing_id):
         return Response("Missing configuration or listing ID", status=400)
 
     try:
-        res = requests.post(XANO_BASE_URL, json={"listing_id": int(listing_id)})
+        res = requests.get(XANO_BASE_URL, params={"listing_id": listing_id})
         res.raise_for_status()
         bookings = res.json()
 
@@ -24,7 +24,7 @@ def generate_ics(listing_id):
         namespace = uuid.UUID("2f1d3dfc-b806-4542-996c-e6f27f1d9a17")
 
         for booking in bookings:
-            uid = str(uuid.uuid5(namespace, f"{listing_id}-{booking.get('uid')}"))
+            uid = str(uuid.uuid5(namespace, f"{listing_id}-{booking.get('uid')}") )
             platform = (booking.get("source_platform") or "").lower()
             raw_uid = booking.get("uid") or ""
             booking_link = ""
@@ -51,7 +51,12 @@ def generate_ics(listing_id):
             event.begin = booking.get("start_date")
             event.end = booking.get("end_date")
             event.uid = uid
-            event.description = f"{booking.get('description', '')}\nBooking Link: {booking_link}".strip()
+            description_parts = []
+            if booking.get("description"):
+                description_parts.append(booking.get("description"))
+            if booking_link:
+                description_parts.append(f"Booking Link: {booking_link}")
+            event.description = "\n".join(description_parts).strip()
             event.location = booking.get("location", "")
             event.make_all_day()
             calendar.events.add(event)
@@ -63,3 +68,4 @@ def generate_ics(listing_id):
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=PORT)
+
