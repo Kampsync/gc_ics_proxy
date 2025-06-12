@@ -4,27 +4,21 @@ import requests
 import re
 from flask import Flask, Response, request
 from ics import Calendar, Event
-from datetime import datetime
 
 app = Flask(__name__)
-
-XANO_BASE_URL = os.environ.get("XANO_BASE_URL")
+XANO_API_BASE_URL = os.environ.get("XANO_BASE_URL")
 PORT = int(os.environ.get("PORT", 8080))
 UUID_NAMESPACE = uuid.UUID("2f1d3dfc-b806-4542-996c-e6f27f1d9a17")
 
 @app.route("/<listing_id>.ics", methods=["GET"])
 def generate_ics(listing_id):
-    if not XANO_BASE_URL or not listing_id:
+    if not XANO_API_BASE_URL or not listing_id:
         return Response("Missing configuration or listing ID", status=400)
 
     try:
-        url = f"{XANO_BASE_URL}/{listing_id}"
-        res = requests.get(url)
-        res.raise_for_status()
-        bookings = res.json()
-
-        if not bookings:
-            return Response("No bookings returned from Xano", status=204)
+        response = requests.get(XANO_API_BASE_URL, params={"listing_id": listing_id})
+        response.raise_for_status()
+        bookings = response.json()
 
         calendar = Calendar()
 
@@ -56,7 +50,10 @@ def generate_ics(listing_id):
             event.begin = booking.get("start_date")
             event.end = booking.get("end_date")
             event.uid = uid
-            event.description = f"{booking.get('description', '')}\nBooking Link: {booking_link}".strip()
+            description = booking.get("description", "")
+            if booking_link:
+                description += f"\nBooking Link: {booking_link}"
+            event.description = description.strip()
             event.location = booking.get("location", "")
             event.make_all_day()
             calendar.events.add(event)
@@ -65,10 +62,6 @@ def generate_ics(listing_id):
 
     except Exception as e:
         return Response(f"Server error: {str(e)}", status=500)
-
-@app.route("/health", methods=["GET"])
-def health():
-    return "ok"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=PORT)
