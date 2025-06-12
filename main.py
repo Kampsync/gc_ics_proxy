@@ -7,14 +7,15 @@ from ics import Calendar, Event
 from datetime import datetime
 
 app = Flask(__name__)
+
 XANO_BASE_URL = os.environ.get("XANO_BASE_URL")
 XANO_SAVE_LINK_URL = os.environ.get("XANO_SAVE_LINK_URL")
-SERVICE_BASE_URL = os.environ.get("SERVICE_BASE_URL")
+SERVICE_BASE_URL = os.environ.get("SERVICE_BASE_URL")  # e.g. https://www.kampsync.com
 PORT = int(os.environ.get("PORT", 8080))
 
 @app.route("/api/<ical_token>.ics", methods=["GET"])
-def generate_ics_by_token(ical_token):
-    if not XANO_BASE_URL or not SERVICE_BASE_URL or not ical_token:
+def generate_ics(ical_token):
+    if not XANO_BASE_URL or not ical_token:
         return Response("Missing configuration or token", status=400)
 
     try:
@@ -22,15 +23,12 @@ def generate_ics_by_token(ical_token):
         res.raise_for_status()
         bookings = res.json()
 
-        if not bookings:
-            return Response("No bookings found.", status=404)
-
-        calendar = Calendar()
-        namespace = uuid.UUID("2f1d3dfc-b806-4542-996c-e6f27f1d9a17")
+        if not isinstance(bookings, list) or not bookings:
+            return Response("No bookings found", status=404)
 
         listing_id = bookings[0].get("listing_id")
-        if not listing_id:
-            return Response("Missing listing_id in booking data", status=500)
+        calendar = Calendar()
+        namespace = uuid.UUID("2f1d3dfc-b806-4542-996c-e6f27f1d9a17")
 
         for booking in bookings:
             uid = str(uuid.uuid5(namespace, f"{ical_token}-{booking.get('uid')}"))
@@ -65,17 +63,15 @@ def generate_ics_by_token(ical_token):
             event.make_all_day()
             calendar.events.add(event)
 
-        # Save permanent link to Xano
-        if XANO_SAVE_LINK_URL:
+        if XANO_SAVE_LINK_URL and SERVICE_BASE_URL:
             try:
-                link_to_save = f"{SERVICE_BASE_URL}/api/{ical_token}.ics"
-                save_payload = {
+                permanent_url = f"{SERVICE_BASE_URL}/api/{ical_token}.ics"
+                requests.post(XANO_SAVE_LINK_URL, json={
                     "listing_id": listing_id,
-                    "kampsync_ical_link": link_to_save
-                }
-                requests.post(XANO_SAVE_LINK_URL, json=save_payload)
-            except Exception as e:
-                print(f"⚠️ Failed to post permanent link to Xano: {e}")
+                    "kampsync_ical_link": permanent_url
+                })
+            except Exception as post_err:
+                print(f"[warn] failed posting ical to Xano: {post_err}")
 
         return Response(str(calendar), mimetype="text/calendar")
 
