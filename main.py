@@ -2,13 +2,15 @@ import os
 import uuid
 import requests
 import re
-from flask import Flask, Response
+from flask import Flask, Response, request
 from ics import Calendar, Event
 from datetime import datetime
 
 app = Flask(__name__)
+
 XANO_BASE_URL = os.environ.get("XANO_BASE_URL")
 PORT = int(os.environ.get("PORT", 8080))
+UUID_NAMESPACE = uuid.UUID("2f1d3dfc-b806-4542-996c-e6f27f1d9a17")
 
 @app.route("/<listing_id>.ics", methods=["GET"])
 def generate_ics(listing_id):
@@ -16,15 +18,18 @@ def generate_ics(listing_id):
         return Response("Missing configuration or listing ID", status=400)
 
     try:
-        res = requests.get(XANO_BASE_URL, params={"listing_id": listing_id})
+        url = f"{XANO_BASE_URL}/{listing_id}"
+        res = requests.get(url)
         res.raise_for_status()
         bookings = res.json()
 
+        if not bookings:
+            return Response("No bookings returned from Xano", status=204)
+
         calendar = Calendar()
-        namespace = uuid.UUID("2f1d3dfc-b806-4542-996c-e6f27f1d9a17")
 
         for booking in bookings:
-            uid = str(uuid.uuid5(namespace, f"{listing_id}-{booking.get('uid')}") )
+            uid = str(uuid.uuid5(UUID_NAMESPACE, f"{listing_id}-{booking.get('uid')}"))
             platform = (booking.get("source_platform") or "").lower()
             raw_uid = booking.get("uid") or ""
             booking_link = ""
@@ -51,12 +56,7 @@ def generate_ics(listing_id):
             event.begin = booking.get("start_date")
             event.end = booking.get("end_date")
             event.uid = uid
-            description_parts = []
-            if booking.get("description"):
-                description_parts.append(booking.get("description"))
-            if booking_link:
-                description_parts.append(f"Booking Link: {booking_link}")
-            event.description = "\n".join(description_parts).strip()
+            event.description = f"{booking.get('description', '')}\nBooking Link: {booking_link}".strip()
             event.location = booking.get("location", "")
             event.make_all_day()
             calendar.events.add(event)
@@ -66,6 +66,9 @@ def generate_ics(listing_id):
     except Exception as e:
         return Response(f"Server error: {str(e)}", status=500)
 
+@app.route("/health", methods=["GET"])
+def health():
+    return "ok"
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=PORT)
-
