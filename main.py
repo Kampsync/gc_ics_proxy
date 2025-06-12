@@ -10,13 +10,13 @@ app = Flask(__name__)
 XANO_BASE_URL = os.environ.get("XANO_BASE_URL")
 PORT = int(os.environ.get("PORT", 8080))
 
-@app.route("/api/calendar/<listing_id>.ics", methods=["GET"])
+@app.route("/<listing_id>.ics", methods=["GET"])
 def generate_ics(listing_id):
     if not XANO_BASE_URL or not listing_id:
         return Response("Missing configuration or listing ID", status=400)
 
     try:
-        res = requests.get(XANO_BASE_URL, params={"listing_id": listing_id})
+        res = requests.post(XANO_BASE_URL, json={"listing_id": int(listing_id)})
         res.raise_for_status()
         bookings = res.json()
 
@@ -46,18 +46,12 @@ def generate_ics(listing_id):
             elif "yescapa" in platform:
                 booking_link = "Log in to your Yescapa dashboard to view booking details."
 
-            description_parts = []
-            if booking.get("description"):
-                description_parts.append(booking.get("description"))
-            if booking_link:
-                description_parts.append(f"Booking Link: {booking_link}")
-
             event = Event()
             event.name = ", ".join(filter(None, [booking.get("source_platform"), booking.get("summary")])) or "booking"
             event.begin = booking.get("start_date")
             event.end = booking.get("end_date")
             event.uid = uid
-            event.description = "\n".join(description_parts).strip()
+            event.description = f"{booking.get('description', '')}\nBooking Link: {booking_link}".strip()
             event.location = booking.get("location", "")
             event.make_all_day()
             calendar.events.add(event)
@@ -69,4 +63,3 @@ def generate_ics(listing_id):
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=PORT)
-
