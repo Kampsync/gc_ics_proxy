@@ -1,12 +1,14 @@
 import os
 import uuid
 import requests
+import re
 from flask import Flask, Response, request
 from ics import Calendar, Event
 from datetime import datetime
 
 app = Flask(__name__)
 XANO_BASE_URL = os.environ.get("XANO_BASE_URL")
+PORT = int(os.environ.get("PORT", 8080))
 
 @app.route("/<listing_id>.ics", methods=["GET"])
 def generate_ics(listing_id):
@@ -22,7 +24,7 @@ def generate_ics(listing_id):
         namespace = uuid.UUID("2f1d3dfc-b806-4542-996c-e6f27f1d9a17")
 
         for booking in bookings:
-            uid = str(uuid.uuid5(namespace, f"{listing_id}-{booking.get('uid')}"))
+            uid = str(uuid.uuid5(namespace, f"{listing_id}-{booking.get('uid')}") )
             platform = (booking.get("source_platform") or "").lower()
             raw_uid = booking.get("uid") or ""
             booking_link = ""
@@ -30,7 +32,6 @@ def generate_ics(listing_id):
             if "rvshare" in platform and len(raw_uid) > 10 and "booking" not in raw_uid.lower():
                 booking_link = "https://rvshare.com/dashboard/reservations"
             elif "outdoorsy" in platform and "booking" in raw_uid.lower():
-                import re
                 match = re.search(r"(\d{6,})", raw_uid)
                 if match:
                     booking_link = f"https://www.outdoorsy.com/dashboard/bookings/{match.group(1)}"
@@ -59,3 +60,6 @@ def generate_ics(listing_id):
 
     except Exception as e:
         return Response(f"Server error: {str(e)}", status=500)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=PORT)
